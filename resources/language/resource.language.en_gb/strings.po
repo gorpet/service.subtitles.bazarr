@@ -1,0 +1,70 @@
+# Kodi Media Center language file
+msgid ""
+msgstr ""
+"Project-Id-Version: XBMC Addons\n"
+"Language-Team: English\n"
+"Language: en\n"
+
+msgctxt "#30000"
+msgid "General"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Bazarr URL"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Bazarr API key"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Verify SSL certificate"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Seconds to wait for Bazarr to write the subtitle"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Enable debug logging"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Base URL of your Bazarr instance, e.g. http://192.168.1.10:6767"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Found in Bazarr under Settings > General > Security"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Disable only if Bazarr uses a self-signed certificate you cannot install"
+msgstr ""
+
+msgctxt "#30014"
+msgid "How long to wait after telling Bazarr to download before looking for the subtitle file next to the video"
+msgstr ""
+
+msgctxt "#30015"
+msgid "Write verbose request/response info to the Kodi log"
+msgstr ""
+
+msgctxt "#32000"
+msgid "Bazarr URL or API key is not configured"
+msgstr ""
+
+msgctxt "#32001"
+msgid "Could not reach Bazarr"
+msgstr ""
+
+msgctxt "#32002"
+msgid "This item was not found in Bazarr's library"
+msgstr ""
+
+msgctxt "#32003"
+msgid "Bazarr did not return a subtitle file in time"
+msgstr ""
+
+msgctxt "#32004"
+msgid "No matching subtitles found"
+msgstr ""
