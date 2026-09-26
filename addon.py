@@ -24,7 +24,7 @@ sys.path.append(__resource__)
 from prelogging import Prelogger  # noqa: E402
 import preutils as pu  # noqa: E402
 from bazarr import (  # noqa: E402
-    BazarrClient, BazarrNotConfigured, BazarrItemNotFound, wait_for_subtitle_file,
+    BazarrClient, BazarrNotConfigured, BazarrItemNotFound, SUBTITLE_EXTENSIONS, wait_for_subtitle_file,
 )
 
 try:
@@ -157,6 +157,25 @@ class ActionHandler(object):
         result = json.loads(self.params['result'][0])
         video_path = self.params['filepath'][0]
 
+        video_dir = pu.dir_of(video_path)
+        video_stem = pu.path_stem(video_path)
+        lang_code = str(result.get('language', ''))
+
+        def snapshot():
+            _dirs, files = xbmcvfs.listdir(video_dir)
+            signatures = {}
+            for name in files:
+                if not name.lower().endswith(SUBTITLE_EXTENSIONS):
+                    continue
+                st = xbmcvfs.Stat(video_dir.rstrip('/') + '/' + name)
+                signatures[name] = (st.st_mtime(), st.st_size())
+            return signatures
+
+        # Snapshot before the download call: Bazarr usually writes the file
+        # before the request returns, and may overwrite an existing subtitle
+        # for this language in place.
+        before = snapshot()
+
         try:
             if context['kind'] == 'episode':
                 self.client.download_episode_subtitle(context['series_id'], context['episode_id'], result)
@@ -173,17 +192,9 @@ class ActionHandler(object):
         except Exception:
             wait_seconds = int(__addon__.getSetting('download_wait_seconds') or 8)
 
-        video_dir = pu.dir_of(video_path)
-        video_stem = pu.path_stem(video_path)
-        lang_code = str(result.get('language', ''))
-
-        def list_dir(path):
-            _dirs, files = xbmcvfs.listdir(path)
-            return files
-
-        found_name = wait_for_subtitle_file(list_dir, video_dir, video_stem, lang_code, wait_seconds)
+        found_name = wait_for_subtitle_file(snapshot, before, video_stem, lang_code, wait_seconds)
         if not found_name:
-            self.log.warning("Bazarr accepted the download but no new subtitle file appeared under {0} within {1}s"
+            self.log.warning("Bazarr accepted the download but no new or updated subtitle file appeared under {0} within {1}s"
                               .format(video_dir, wait_seconds))
             self.notify(get_local_str(32003))
             self.add_subtitle_dir_item('')

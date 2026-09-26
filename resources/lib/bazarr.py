@@ -194,23 +194,44 @@ class BazarrClient(object):
         }
 
 
-def wait_for_subtitle_file(list_dir_fn, video_dir, video_stem, lang_code, timeout_seconds, poll_interval=1):
-    """Poll a directory for a subtitle file that (a) appeared after we asked
-    Bazarr to download one and (b) looks like it belongs to this video and
-    language. `list_dir_fn` is injected so this module stays free of Kodi
-    imports (xbmcvfs) and can be unit tested on a desktop Python."""
+SUBTITLE_EXTENSIONS = ('.srt', '.ass', '.ssa', '.sub', '.vtt')
+
+
+def is_subtitle_candidate(name, video_stem, lang_code):
+    lower = name.lower()
+    if not lower.endswith(SUBTITLE_EXTENSIONS):
+        return False
+    return video_stem.lower() in lower or lang_code.lower() in lower
+
+
+def wait_for_subtitle_file(snapshot_fn, before, video_stem, lang_code, timeout_seconds, poll_interval=1):
+    """Poll a directory for a subtitle file that belongs to this video and
+    language and was either created or rewritten since `before` was taken.
+
+    `snapshot_fn()` returns {filename: signature} (e.g. (mtime, size)) and
+    `before` is a snapshot taken BEFORE asking Bazarr to download - Bazarr
+    usually writes the file before the download request returns. Comparing
+    signatures (not just names) matters because Bazarr overwrites an
+    existing subtitle for the same language in place, which leaves the set
+    of filenames unchanged.
+
+    `snapshot_fn` is injected so this module stays free of Kodi imports
+    (xbmcvfs) and can be unit tested on a desktop Python."""
     deadline = time.time() + timeout_seconds
-    before = set(list_dir_fn(video_dir))
-    while time.time() < deadline:
-        time.sleep(poll_interval)
-        after = set(list_dir_fn(video_dir))
-        new_files = after - before
-        for name in new_files:
-            lower = name.lower()
-            if not lower.endswith(('.srt', '.ass', '.ssa', '.sub', '.vtt')):
-                continue
-            if video_stem.lower() in lower or lang_code.lower() in lower:
+    while True:
+        after = snapshot_fn()
+        for name, signature in after.items():
+            if before.get(name) != signature and is_subtitle_candidate(name, video_stem, lang_code):
                 return name
-        # keep growing "before" in case Bazarr writes a temp file first
-        before = after
+        if time.time() >= deadline:
+            break
+        time.sleep(poll_interval)
+
+    # Bazarr accepted the download but nothing visibly changed - e.g. it
+    # rewrote identical content within the filesystem's mtime resolution.
+    # Fall back to the existing file named after this video and language.
+    wanted = '{0}.{1}.'.format(video_stem, lang_code).lower()
+    for name in sorted(after):
+        if name.lower().startswith(wanted) and name.lower().endswith(SUBTITLE_EXTENSIONS):
+            return name
     return None
