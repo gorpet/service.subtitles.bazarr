@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 
 import xbmc
 import xbmcaddon
@@ -26,6 +27,7 @@ import preutils as pu  # noqa: E402
 from bazarr import (  # noqa: E402
     BazarrClient, BazarrNotConfigured, BazarrItemNotFound, SUBTITLE_EXTENSIONS, wait_for_subtitle_file,
 )
+from holyarrs import HolyArrsClient, HolyArrsNotConfigured, HolyArrsItemNotFound  # noqa: E402
 
 try:
     import requests
@@ -48,9 +50,14 @@ class ActionHandler(object):
             'download': self.download,
         }
 
+        self.backend = (__addon__.getSetting('backend') or 'bazarr').strip().lower()
+        if self.backend not in ('bazarr', 'holyarrs'):
+            self.backend = 'bazarr'
         self.client = self._build_client()
 
     def _build_client(self):
+        if self.backend == 'holyarrs':
+            return self._build_holyarrs_client()
         base_url = __addon__.getSetting('bazarr_url')
         api_key = __addon__.getSetting('bazarr_apikey')
         try:
@@ -61,6 +68,18 @@ class ActionHandler(object):
             return BazarrClient(base_url, api_key, verify_ssl=verify_ssl)
         except BazarrNotConfigured:
             self.notify(get_local_str(32000))
+            return None
+
+    def _build_holyarrs_client(self):
+        try:
+            verify_ssl = __addon__.getSettingBool('verify_ssl')
+        except Exception:
+            verify_ssl = __addon__.getSetting('verify_ssl') != 'false'
+        try:
+            return HolyArrsClient(__addon__.getSetting('holyarrs_url'), __addon__.getSetting('holyarrs_apikey'),
+                                  verify_ssl=verify_ssl)
+        except HolyArrsNotConfigured:
+            self.notify(get_local_str(32005))
             return None
 
     def notify(self, message):
@@ -83,6 +102,10 @@ class ActionHandler(object):
         show = self.get_current_show()
         wanted_langs = pu.kodi_langs_to_iso639_1(self.params.get('languages', [''])[0])
         self.log.debug("Current show: {0}, wanted langs: {1}".format(show, wanted_langs))
+
+        if self.backend == 'holyarrs':
+            self._search_holyarrs(show, wanted_langs)
+            return
 
         try:
             if show['type'] == 'episode':
@@ -115,6 +138,35 @@ class ActionHandler(object):
             self.notify(get_local_str(32004))
             return
 
+        for result in results:
+            self._add_search_result_item(show, context, result)
+
+    def _search_holyarrs(self, show, wanted_langs):
+        """HolyArrs: find the playing file by its library path, then ask its
+        subtitle sites for candidates (nothing is saved until one is picked)."""
+        media_type = 'episode' if show.get('type') == 'episode' else 'movie'
+        try:
+            found = self.client.find_file(show.get('file_original_path'), media_type=media_type,
+                                          title=show.get('title'), tvshow_title=show.get('tvshow_title'))
+            results = self.client.list_subtitles(found['file_id'])
+        except HolyArrsItemNotFound as exc:
+            self.log.warning(str(exc))
+            self.notify(get_local_str(32006))
+            return
+        except Exception as exc:  # noqa: BLE001 - surface any transport error to the user
+            self.log.error("HolyArrs request failed: {0}".format(exc))
+            self.notify(get_local_str(32007))
+            return
+
+        if wanted_langs:
+            results = [r for r in results if str(r.get('language', '')).lower()[:2] in wanted_langs]
+        if not results:
+            # HolyArrs only offers candidates for languages the file is missing
+            # (or that it saved itself); a subtitle from elsewhere is left alone.
+            self.notify(get_local_str(32008))
+            return
+
+        context = {'kind': 'holyarrs', 'file_id': found['file_id']}
         for result in results:
             self._add_search_result_item(show, context, result)
 
@@ -161,6 +213,10 @@ class ActionHandler(object):
         video_stem = pu.path_stem(video_path)
         lang_code = str(result.get('language', ''))
 
+        if context.get('kind') == 'holyarrs':
+            self._download_holyarrs(context, result, video_dir)
+            return
+
         def snapshot():
             _dirs, files = xbmcvfs.listdir(video_dir)
             signatures = {}
@@ -201,6 +257,36 @@ class ActionHandler(object):
             return
 
         subtitle_path = video_dir.rstrip('/') + '/' + found_name
+        self.add_subtitle_dir_item(subtitle_path)
+
+    def _download_holyarrs(self, context, result, video_dir):
+        """HolyArrs saves the chosen subtitle beside the video itself and says
+        where; wait briefly for the share to show the file, then hand it to Kodi."""
+        try:
+            saved = self.client.choose(context['file_id'], result)
+        except Exception as exc:  # noqa: BLE001
+            self.log.error("HolyArrs choose failed: {0}".format(exc))
+            self.notify(get_local_str(32007))
+            self.add_subtitle_dir_item('')
+            return
+        name = pu.path_leaf(saved or '')
+        if not name:
+            self.notify(get_local_str(32003))
+            self.add_subtitle_dir_item('')
+            return
+        subtitle_path = video_dir.rstrip('/') + '/' + name
+        try:
+            wait_seconds = __addon__.getSettingInt('download_wait_seconds')
+        except Exception:
+            wait_seconds = int(__addon__.getSetting('download_wait_seconds') or 8)
+        deadline = time.time() + wait_seconds
+        while not xbmcvfs.exists(subtitle_path) and time.time() < deadline:
+            time.sleep(0.5)  # a network share can show a new file a moment late
+        if not xbmcvfs.exists(subtitle_path):
+            self.log.warning("HolyArrs saved {0} but {1} does not show it within {2}s".format(saved, subtitle_path, wait_seconds))
+            self.notify(get_local_str(32003))
+            self.add_subtitle_dir_item('')
+            return
         self.add_subtitle_dir_item(subtitle_path)
 
     def add_subtitle_dir_item(self, subtitle_path):

@@ -26,6 +26,32 @@ Addon settings (`Add-ons -> My add-ons -> Subtitles -> Bazarr -> Configure`):
   polls the video's folder before giving up
 - **Enable debug logging** - verbose request/response lines in `kodi.log`
 
+## Using HolyArrs instead of Bazarr (0.2.0)
+
+Pick **Subtitle server -> HolyArrs** in the add-on settings and fill in **HolyArrs URL** and
+**HolyArrs API key** (HolyArrs `Settings > API`, a key with the **all** scope). Bazarr stays the
+default and its code path is unchanged.
+
+How it differs from Bazarr:
+
+- The playing file is found by **path**: HolyArrs lists every file with a path relative to its
+  library folder (`Nobody (2021)/Nobody (2021).mkv`) and Kodi's playing path ends with it
+  (percent-escapes, case and `\` vs `/` are ignored). The title is only used to narrow the lookup,
+  with the folder name as a fallback. So Kodi and HolyArrs must see the files at paths that end alike.
+- `GET /api/v1/titles?q=` -> `GET /api/v1/titles/{id}/subtitles` (match by path) ->
+  `POST /api/v1/files/{id}/subtitles/choices` (asks the subtitle sites now, scored candidates,
+  saves nothing) -> `POST /api/v1/files/{id}/subtitles/choose` (`{"site","key"}`: saves the pick beside
+  the video and answers its path). Auth is the `X-Api-Key` header. No polling guesswork is needed:
+  the saved name comes back from `choose`.
+- **Limit:** `choices` offers candidates for languages the file is *missing* and for subtitles
+  HolyArrs saved itself. A subtitle that came from elsewhere (for example Bazarr's) is not asked
+  again, so "nothing to offer" is normal for a file that already has every wished language.
+
+## Tests
+
+`cd tests && python3 -m unittest discover -s . -p "test_*.py"` runs on a normal Python 3 with
+`requests`; Kodi's modules are stubbed in `tests/kodistubs.py`.
+
 ## How it works
 
 1. `search()` resolves the currently playing/focused item to a Bazarr
