@@ -43,14 +43,12 @@ How it differs from Bazarr:
   saves nothing) -> `POST /api/v1/files/{id}/subtitles/choose` (`{"site","key"}`: saves the pick beside
   the video and answers its path). Auth is the `X-Api-Key` header. No polling guesswork is needed:
   the saved name comes back from `choose`.
-- **Limit:** `choices` offers candidates for languages the file is *missing* and for subtitles
-  HolyArrs saved itself. A subtitle that came from elsewhere (for example Bazarr's) is not asked
-  again, so "nothing to offer" is normal for a file that already has every wished language.
+- **Languages already covered:** from HolyArrs 1.3.0 on, the list shows candidates for every wished language,
+  even one a sidecar or built-in track already has (HolyArrs reports what covers it), so you can swap a
+  subtitle. On HolyArrs 1.2.x only languages the file is *missing* are offered, and "no new subtitle to
+  offer" is normal for a file that already has every wished language. Only languages in the title's wish
+  are listed.
 
-## Tests
-
-`cd tests && python3 -m unittest discover -s . -p "test_*.py"` runs on a normal Python 3 with
-`requests`; Kodi's modules are stubbed in `tests/kodistubs.py`.
 
 ## How it works
 
