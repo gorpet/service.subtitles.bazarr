@@ -279,31 +279,43 @@ class ActionHandler(object):
         subtitle_path = video_dir.rstrip('/') + '/' + found_name
         self.add_subtitle_dir_item(subtitle_path)
 
-    def _move_old_subtitles_aside(self, video_dir, video_stem, language):
-        """Ask before touching anything, then rename each old subtitle to '<name>.bak' (never delete).
-        Returns [(old_path, bak_path)] for what was moved; empty when there is nothing to move or the user said no."""
+    def _remove_old_subtitles(self, video_dir, video_stem, language):
+        """Ask before touching anything, then delete this video's old subtitle files for the language so HolyArrs can
+        save the new one under that name. The contents are kept in memory until the save works, so a failed save
+        puts them back. Returns [(path, bytes)] for what was removed; empty when nothing was removed."""
         _dirs, files = xbmcvfs.listdir(video_dir)
         names = conflicting_subtitles(files, video_stem, language)
         if not names:
             return []
         if not __dialog__.yesno(get_local_str(32011), get_local_str(32012).format(', '.join(names))):
             return []
-        moved = []
+        removed = []
         base = video_dir.rstrip('/') + '/'
         for name in names:
-            aside = base + name + '.bak'
-            n = 1
-            while xbmcvfs.exists(aside):
-                n += 1
-                aside = base + name + '.bak' + str(n)
-            if xbmcvfs.rename(base + name, aside):
-                moved.append((base + name, aside))
-            else:
-                self.log.error("Could not move {0} aside".format(base + name))
-                for old, back in moved:
-                    xbmcvfs.rename(back, old)
+            path = base + name
+            try:
+                handle = xbmcvfs.File(path)
+                content = handle.readBytes()
+                handle.close()
+            except Exception as exc:  # noqa: BLE001
+                self.log.error("Could not read {0} before replacing it: {1}".format(path, exc))
+                self._restore_subtitles(removed)
                 return []
-        return moved
+            if not xbmcvfs.delete(path):
+                self.log.error("Could not delete {0}".format(path))
+                self._restore_subtitles(removed)
+                return []
+            removed.append((path, content))
+        return removed
+
+    def _restore_subtitles(self, removed):
+        for path, content in removed:
+            try:
+                handle = xbmcvfs.File(path, 'w')
+                handle.write(content)
+                handle.close()
+            except Exception as exc:  # noqa: BLE001
+                self.log.error("Could not put {0} back: {1}".format(path, exc))
 
     def _download_holyarrs(self, context, result, video_dir, video_stem=''):
         """HolyArrs saves the chosen subtitle beside the video itself and says
@@ -315,15 +327,14 @@ class ActionHandler(object):
             except Exception as exc:  # noqa: BLE001
                 if not is_foreign_file_conflict(exc):
                     raise
-                # HolyArrs never overwrites a subtitle it did not save. Offer to move the old one aside, then try again.
-                moved = self._move_old_subtitles_aside(video_dir, video_stem, str(result.get('language', '')))
+                # HolyArrs never overwrites a subtitle it did not save. Offer to replace the old one, then try again.
+                moved = self._remove_old_subtitles(video_dir, video_stem, str(result.get('language', '')))
                 if not moved:
                     raise
                 saved = self.client.choose(context['file_id'], result)
         except Exception as exc:  # noqa: BLE001
             self.log.error("HolyArrs choose failed: {0}".format(exc))
-            for old, aside in moved:  # the new one was not saved: put the old subtitle back
-                xbmcvfs.rename(aside, old)
+            self._restore_subtitles(moved)  # the new one was not saved: put the old subtitle back
             self.notify(get_local_str(self._holyarrs_error_string(exc)))
             self.add_subtitle_dir_item('')
             return

@@ -130,5 +130,5 @@ msgid "Replace the existing subtitle?"
 msgstr ""
 
 msgctxt "#32012"
-msgid "HolyArrs does not overwrite a subtitle it did not save. Move this aside (renamed to .bak) and save the new one? {0}"
+msgid "HolyArrs does not overwrite a subtitle it did not save. Delete this and save the new one in its place? {0}"
 msgstr ""

@@ -204,33 +204,38 @@ class DownloadTests(unittest.TestCase):
         dialog.yesno.return_value = answer
         return c, dialog
 
-    def test_an_old_subtitle_is_moved_aside_after_asking_and_the_pick_is_saved(self):
+    def test_an_old_subtitle_is_replaced_after_asking_and_the_pick_is_saved(self):
         c, dialog = self.replace_setup()
+        S.contents = {self.DIR + 'Nobody (2021).hr.srt': b'OLD'}
         with mock.patch.object(addon, '__dialog__', dialog), \
-                mock.patch.object(addon, 'get_local_str', lambda i: 'move aside: {0}' if i == 32012 else 'str%d' % i):
+                mock.patch.object(addon, 'get_local_str', lambda i: 'replace: {0}' if i == 32012 else 'str%d' % i):
             handler(self.query(), c).do()
-        self.assertEqual(S.renames, [(self.DIR + 'Nobody (2021).hr.srt', self.DIR + 'Nobody (2021).hr.srt.bak')])
+        self.assertEqual(S.deleted, [self.DIR + 'Nobody (2021).hr.srt'])
+        self.assertEqual(S.written, [])                                  # nothing put back: the save worked
         self.assertEqual([x[0] for x in c.calls], ['choose', 'choose'])
         self.assertIn('Nobody (2021).hr.srt', dialog.yesno.call_args[0][1])
-        self.assertNotIn('.en.srt', dialog.yesno.call_args[0][1])  # only this language
-        self.assertNotIn('Other (2020)', dialog.yesno.call_args[0][1])  # only this video
+        self.assertNotIn('.en.srt', dialog.yesno.call_args[0][1])        # only this language
+        self.assertNotIn('Other (2020)', dialog.yesno.call_args[0][1])   # only this video
         self.assertEqual(S.items[-1][0], self.DIR + 'Nobody (2021).hr.srt')
 
     def test_saying_no_leaves_the_old_subtitle_alone(self):
         c, dialog = self.replace_setup(answer=False)
         with mock.patch.object(addon, '__dialog__', dialog):
             handler(self.query(), c).do()
-        self.assertEqual(S.renames, [])
+        self.assertEqual(S.deleted, [])
         self.assertEqual([x[0] for x in c.calls], ['choose'])
         self.assertEqual(S.items[-1][0], '')
         self.assertIn('str32010', S.notifications[-1])
 
-    def test_the_old_subtitle_comes_back_when_the_new_one_still_cannot_be_saved(self):
+    def test_the_old_subtitle_is_written_back_when_the_new_one_still_cannot_be_saved(self):
         c, dialog = self.replace_setup(conflicts=2)
+        old = self.DIR + 'Nobody (2021).hr.srt'
+        S.contents = {old: b'OLD CONTENT'}
         with mock.patch.object(addon, '__dialog__', dialog):
             handler(self.query(), c).do()
-        old, aside = self.DIR + 'Nobody (2021).hr.srt', self.DIR + 'Nobody (2021).hr.srt.bak'
-        self.assertEqual(S.renames, [(old, aside), (aside, old)])
+        self.assertEqual(S.deleted, [old])
+        self.assertEqual(S.written, [old])
+        self.assertEqual(S.contents[old], b'OLD CONTENT')
         self.assertEqual(S.items[-1][0], '')
 
     def test_no_old_subtitle_found_means_no_question(self):
@@ -239,7 +244,7 @@ class DownloadTests(unittest.TestCase):
         with mock.patch.object(addon, '__dialog__', dialog):
             handler(self.query(), c).do()
         dialog.yesno.assert_not_called()
-        self.assertEqual(S.renames, [])
+        self.assertEqual(S.deleted, [])
         self.assertIn('str32010', S.notifications[-1])
 
 

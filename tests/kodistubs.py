@@ -18,7 +18,9 @@ class State(object):
     items = []          # xbmcplugin.addDirectoryItem calls: (url, label, label2)
     existing = set()    # paths xbmcvfs.exists() answers True for
     files = {}          # folder -> file names xbmcvfs.listdir() returns
-    renames = []        # xbmcvfs.rename calls: (from, to)
+    deleted = []        # xbmcvfs.delete calls
+    written = []        # xbmcvfs.File(...,'w').write targets
+    contents = {}       # path -> bytes for xbmcvfs.File reads/writes
     playing = {}
     langs = {'croatian': 'hr', 'english': 'en', 'serbian': 'sr', 'bosnian': 'bs'}
 
@@ -28,7 +30,7 @@ class State(object):
                         'bazarr_url': 'http://b', 'bazarr_apikey': 'k', 'verify_ssl': 'true',
                         'download_wait_seconds': '1', 'debug_logging': 'false'}
         cls.notifications, cls.log, cls.items, cls.existing = [], [], [], set()
-        cls.files, cls.renames = {}, []
+        cls.files, cls.deleted, cls.written, cls.contents = {}, [], [], {}
         cls.playing = {'type': 'movie', 'file': '/media/movies/Nobody (2021)/Nobody (2021).mkv',
                        'title': 'Nobody', 'year': 2021, 'imdb': 'tt7888964'}
 
@@ -98,12 +100,23 @@ def install():
     xbmcvfs.exists = lambda p: p in S.existing
     xbmcvfs.listdir = lambda d: ([], list(S.files.get(d, [])))
 
-    def rename(a, b):
-        S.renames.append((a, b))
-        S.existing.discard(a)
-        S.existing.add(b)
+    def delete(path):
+        S.deleted.append(path)
+        S.existing.discard(path)
         return True
-    xbmcvfs.rename = rename
+    xbmcvfs.delete = delete
+
+    class File(object):
+        def __init__(self, path, mode='r'):
+            self.path, self.mode = path, mode
+        def readBytes(self): return S.contents.get(self.path, b'old subtitle')
+        def write(self, data):
+            S.contents[self.path] = data
+            S.written.append(self.path)
+            S.existing.add(self.path)
+            return True
+        def close(self): pass
+    xbmcvfs.File = File
 
     for name, mod in (('xbmc', xbmc), ('xbmcaddon', xbmcaddon), ('xbmcgui', xbmcgui), ('xbmcplugin', xbmcplugin), ('xbmcvfs', xbmcvfs)):
         sys.modules[name] = mod
