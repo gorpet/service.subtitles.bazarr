@@ -20,6 +20,8 @@ class FakeClient(object):
         self.found = found if found is not None else {'file_id': 11, 'item_id': 11, 'title_id': 4, 'relative_path': 'Nobody (2021)/Nobody (2021).mkv',
                                                       'wish': [{'language': 'hr', 'hearing_impaired': 'normal', 'forced': False}]}
         self.calls = []
+        self.on_saved = None  # called when choose succeeds, to make the new file appear
+        self.conflicts = 0  # how many times choose answers 'a subtitle HolyArrs did not save is there' (HTTP 409)
         self.added = None  # what ensure_languages answers; None = work out from the wish like the real client
 
     def find_file(self, video_path, media_type='movie', title=None, tvshow_title=None):
@@ -47,6 +49,11 @@ class FakeClient(object):
         self.calls.append(('choose', file_id, result['subtitle']))
         if self.fail == 'choose':
             raise RuntimeError('boom')
+        if self.conflicts > 0:
+            self.conflicts -= 1
+            raise addon.HolyArrsHTTPError(409, 'a subtitle file HolyArrs did not save is at that name; it is left alone')
+        if self.on_saved:
+            self.on_saved()
         return self.saved
 
 
@@ -184,6 +191,56 @@ class DownloadTests(unittest.TestCase):
         handler(self.query(), FakeClient(fail='choose')).do()
         self.assertEqual(S.items[-1][0], '')
         self.assertIn('str32007', S.notifications[-1])
+
+    DIR = '/media/movies/Nobody (2021)/'
+
+    def replace_setup(self, conflicts=1, answer=True, fail_after=False):
+        S.files = {self.DIR.rstrip('/'): ['Nobody (2021).mkv', 'Nobody (2021).hr.srt', 'Nobody (2021).en.srt', 'Other (2020).hr.srt']}
+        S.existing = {self.DIR + 'Nobody (2021).hr.srt'}
+        c = FakeClient()
+        c.conflicts = conflicts
+        c.on_saved = lambda: S.existing.add(self.DIR + 'Nobody (2021).hr.srt')
+        dialog = mock.Mock()
+        dialog.yesno.return_value = answer
+        return c, dialog
+
+    def test_an_old_subtitle_is_moved_aside_after_asking_and_the_pick_is_saved(self):
+        c, dialog = self.replace_setup()
+        with mock.patch.object(addon, '__dialog__', dialog), \
+                mock.patch.object(addon, 'get_local_str', lambda i: 'move aside: {0}' if i == 32012 else 'str%d' % i):
+            handler(self.query(), c).do()
+        self.assertEqual(S.renames, [(self.DIR + 'Nobody (2021).hr.srt', self.DIR + 'Nobody (2021).hr.srt.bak')])
+        self.assertEqual([x[0] for x in c.calls], ['choose', 'choose'])
+        self.assertIn('Nobody (2021).hr.srt', dialog.yesno.call_args[0][1])
+        self.assertNotIn('.en.srt', dialog.yesno.call_args[0][1])  # only this language
+        self.assertNotIn('Other (2020)', dialog.yesno.call_args[0][1])  # only this video
+        self.assertEqual(S.items[-1][0], self.DIR + 'Nobody (2021).hr.srt')
+
+    def test_saying_no_leaves_the_old_subtitle_alone(self):
+        c, dialog = self.replace_setup(answer=False)
+        with mock.patch.object(addon, '__dialog__', dialog):
+            handler(self.query(), c).do()
+        self.assertEqual(S.renames, [])
+        self.assertEqual([x[0] for x in c.calls], ['choose'])
+        self.assertEqual(S.items[-1][0], '')
+        self.assertIn('str32010', S.notifications[-1])
+
+    def test_the_old_subtitle_comes_back_when_the_new_one_still_cannot_be_saved(self):
+        c, dialog = self.replace_setup(conflicts=2)
+        with mock.patch.object(addon, '__dialog__', dialog):
+            handler(self.query(), c).do()
+        old, aside = self.DIR + 'Nobody (2021).hr.srt', self.DIR + 'Nobody (2021).hr.srt.bak'
+        self.assertEqual(S.renames, [(old, aside), (aside, old)])
+        self.assertEqual(S.items[-1][0], '')
+
+    def test_no_old_subtitle_found_means_no_question(self):
+        c, dialog = self.replace_setup()
+        S.files = {self.DIR.rstrip('/'): ['Nobody (2021).mkv']}
+        with mock.patch.object(addon, '__dialog__', dialog):
+            handler(self.query(), c).do()
+        dialog.yesno.assert_not_called()
+        self.assertEqual(S.renames, [])
+        self.assertIn('str32010', S.notifications[-1])
 
 
 if __name__ == '__main__':

@@ -17,6 +17,8 @@ class State(object):
     log = []
     items = []          # xbmcplugin.addDirectoryItem calls: (url, label, label2)
     existing = set()    # paths xbmcvfs.exists() answers True for
+    files = {}          # folder -> file names xbmcvfs.listdir() returns
+    renames = []        # xbmcvfs.rename calls: (from, to)
     playing = {}
     langs = {'croatian': 'hr', 'english': 'en', 'serbian': 'sr', 'bosnian': 'bs'}
 
@@ -26,6 +28,7 @@ class State(object):
                         'bazarr_url': 'http://b', 'bazarr_apikey': 'k', 'verify_ssl': 'true',
                         'download_wait_seconds': '1', 'debug_logging': 'false'}
         cls.notifications, cls.log, cls.items, cls.existing = [], [], [], set()
+        cls.files, cls.renames = {}, []
         cls.playing = {'type': 'movie', 'file': '/media/movies/Nobody (2021)/Nobody (2021).mkv',
                        'title': 'Nobody', 'year': 2021, 'imdb': 'tt7888964'}
 
@@ -93,7 +96,14 @@ def install():
     xbmcvfs = types.ModuleType('xbmcvfs')
     xbmcvfs.translatePath = lambda p: p
     xbmcvfs.exists = lambda p: p in S.existing
-    xbmcvfs.listdir = lambda d: ([], [])
+    xbmcvfs.listdir = lambda d: ([], list(S.files.get(d, [])))
+
+    def rename(a, b):
+        S.renames.append((a, b))
+        S.existing.discard(a)
+        S.existing.add(b)
+        return True
+    xbmcvfs.rename = rename
 
     for name, mod in (('xbmc', xbmc), ('xbmcaddon', xbmcaddon), ('xbmcgui', xbmcgui), ('xbmcplugin', xbmcplugin), ('xbmcvfs', xbmcvfs)):
         sys.modules[name] = mod

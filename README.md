@@ -47,6 +47,11 @@ How it differs from Bazarr:
   even one a sidecar or built-in track already has (HolyArrs reports what covers it), so you can swap a
   subtitle. On HolyArrs 1.2.x only languages the file is *missing* are offered, and "no new subtitle to
   offer" is normal for a file that already has every wished language.
+- **Replacing a subtitle HolyArrs did not save (0.2.2):** HolyArrs never overwrites a subtitle file it did not
+  save itself (for example one Bazarr saved), and answers HTTP 409. The add-on then asks "Replace the existing
+  subtitle?" and, on Yes, renames that video's subtitle files for that language to `<name>.bak` (never deleted),
+  and asks HolyArrs to save the pick again. If the save still fails, the files are renamed back. Kodi needs
+  write access to the folder (a read-only share cannot do this and the add-on says so in the log).
 - **Languages outside the wish:** HolyArrs lists, and saves, only languages in the file's wish. So you can keep
   the global wish short (say only Croatian, so the background search stays small) and still ask Kodi for
   Bosnian: the add-on adds the languages Kodi asks for (Kodi's "Languages to download subtitles for") to

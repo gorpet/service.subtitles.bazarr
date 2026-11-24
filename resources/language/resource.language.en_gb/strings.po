@@ -124,3 +124,11 @@ msgstr ""
 msgctxt "#32010"
 msgid "HolyArrs answered with an error (see the Kodi log)"
 msgstr ""
+
+msgctxt "#32011"
+msgid "Replace the existing subtitle?"
+msgstr ""
+
+msgctxt "#32012"
+msgid "HolyArrs does not overwrite a subtitle it did not save. Move this aside (renamed to .bak) and save the new one? {0}"
+msgstr ""

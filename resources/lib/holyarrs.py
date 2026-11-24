@@ -107,6 +107,29 @@ def normalize_path_keep_case(path):
     return unquote(path or '').replace('\\', '/').strip().rstrip('/')
 
 
+SUBTITLE_EXTENSIONS = ('.srt', '.ass', '.ssa', '.sub', '.vtt')
+
+
+def is_foreign_file_conflict(exc):
+    """True when HolyArrs refused to save because a subtitle it did not save is already at that name."""
+    return isinstance(exc, HolyArrsHTTPError) and exc.status == 409 and 'did not save' in str(exc)
+
+
+def conflicting_subtitles(names, video_stem, language):
+    """The subtitle files in the video's folder that are for this video and language, e.g. 'Show S01E02.hr.srt'
+    and 'Show S01E02.hr.forced.srt'. HolyArrs does not say which name it refused, so every one of them is a candidate."""
+    language = (language or '').lower()
+    stem = (video_stem or '') + '.'
+    found = []
+    for name in names:
+        if not name.startswith(stem) or not name.lower().endswith(SUBTITLE_EXTENSIONS):
+            continue
+        tokens = [t.lower() for t in name[len(stem):].split('.')[:-1]]
+        if language and language in tokens:
+            found.append(name)
+    return sorted(found)
+
+
 class HolyArrsClient(object):
 
     def __init__(self, base_url, api_key, verify_ssl=True, timeout=60):

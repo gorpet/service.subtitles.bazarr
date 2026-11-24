@@ -172,6 +172,20 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 409)
         self.assertIn('language not wished', str(ctx.exception))
 
+    def test_conflicting_subtitles_are_this_videos_files_in_this_language(self):
+        names = ['Nobody (2021).mkv', 'Nobody (2021).hr.srt', 'Nobody (2021).hr.forced.srt', 'Nobody (2021).en.srt',
+                 'Nobody (2021).hr.srt.bak', 'Nobody (2021) Extras.hr.srt', 'Other.hr.srt']
+        self.assertEqual(holyarrs.conflicting_subtitles(names, 'Nobody (2021)', 'hr'),
+                         ['Nobody (2021).hr.forced.srt', 'Nobody (2021).hr.srt'])
+        self.assertEqual(holyarrs.conflicting_subtitles(names, 'Nobody (2021)', ''), [])
+
+    def test_only_the_did_not_save_refusal_counts_as_a_foreign_file_conflict(self):
+        e = holyarrs.HolyArrsHTTPError
+        self.assertTrue(holyarrs.is_foreign_file_conflict(e(409, 'a subtitle file HolyArrs did not save is at that name; it is left alone')))
+        self.assertFalse(holyarrs.is_foreign_file_conflict(e(409, 'the candidate cannot be used')))
+        self.assertFalse(holyarrs.is_foreign_file_conflict(e(502, 'a subtitle file HolyArrs did not save')))
+        self.assertFalse(holyarrs.is_foreign_file_conflict(RuntimeError('did not save')))
+
 
 if __name__ == '__main__':
     unittest.main()

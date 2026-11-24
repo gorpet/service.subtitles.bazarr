@@ -27,7 +27,7 @@ import preutils as pu  # noqa: E402
 from bazarr import (  # noqa: E402
     BazarrClient, BazarrNotConfigured, BazarrItemNotFound, SUBTITLE_EXTENSIONS, wait_for_subtitle_file,
 )
-from holyarrs import HolyArrsClient, HolyArrsNotConfigured, HolyArrsItemNotFound, HolyArrsAuthError, HolyArrsHTTPError  # noqa: E402
+from holyarrs import HolyArrsClient, HolyArrsNotConfigured, HolyArrsItemNotFound, HolyArrsAuthError, HolyArrsHTTPError, is_foreign_file_conflict, conflicting_subtitles  # noqa: E402
 
 try:
     import requests
@@ -234,7 +234,7 @@ class ActionHandler(object):
         lang_code = str(result.get('language', ''))
 
         if context.get('kind') == 'holyarrs':
-            self._download_holyarrs(context, result, video_dir)
+            self._download_holyarrs(context, result, video_dir, video_stem)
             return
 
         def snapshot():
@@ -279,13 +279,51 @@ class ActionHandler(object):
         subtitle_path = video_dir.rstrip('/') + '/' + found_name
         self.add_subtitle_dir_item(subtitle_path)
 
-    def _download_holyarrs(self, context, result, video_dir):
+    def _move_old_subtitles_aside(self, video_dir, video_stem, language):
+        """Ask before touching anything, then rename each old subtitle to '<name>.bak' (never delete).
+        Returns [(old_path, bak_path)] for what was moved; empty when there is nothing to move or the user said no."""
+        _dirs, files = xbmcvfs.listdir(video_dir)
+        names = conflicting_subtitles(files, video_stem, language)
+        if not names:
+            return []
+        if not __dialog__.yesno(get_local_str(32011), get_local_str(32012).format(', '.join(names))):
+            return []
+        moved = []
+        base = video_dir.rstrip('/') + '/'
+        for name in names:
+            aside = base + name + '.bak'
+            n = 1
+            while xbmcvfs.exists(aside):
+                n += 1
+                aside = base + name + '.bak' + str(n)
+            if xbmcvfs.rename(base + name, aside):
+                moved.append((base + name, aside))
+            else:
+                self.log.error("Could not move {0} aside".format(base + name))
+                for old, back in moved:
+                    xbmcvfs.rename(back, old)
+                return []
+        return moved
+
+    def _download_holyarrs(self, context, result, video_dir, video_stem=''):
         """HolyArrs saves the chosen subtitle beside the video itself and says
         where; wait briefly for the share to show the file, then hand it to Kodi."""
+        moved = []
         try:
-            saved = self.client.choose(context['file_id'], result)
+            try:
+                saved = self.client.choose(context['file_id'], result)
+            except Exception as exc:  # noqa: BLE001
+                if not is_foreign_file_conflict(exc):
+                    raise
+                # HolyArrs never overwrites a subtitle it did not save. Offer to move the old one aside, then try again.
+                moved = self._move_old_subtitles_aside(video_dir, video_stem, str(result.get('language', '')))
+                if not moved:
+                    raise
+                saved = self.client.choose(context['file_id'], result)
         except Exception as exc:  # noqa: BLE001
             self.log.error("HolyArrs choose failed: {0}".format(exc))
+            for old, aside in moved:  # the new one was not saved: put the old subtitle back
+                xbmcvfs.rename(aside, old)
             self.notify(get_local_str(self._holyarrs_error_string(exc)))
             self.add_subtitle_dir_item('')
             return
