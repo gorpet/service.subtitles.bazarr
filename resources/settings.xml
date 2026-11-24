@@ -2,19 +2,6 @@
     <section id="service.subtitles.bazarr">
         <category id="general" label="30000">
             <group id="1">
-                <setting id="backend" type="string" label="30006" help="30016">
-                    <level>0</level>
-                    <default>bazarr</default>
-                    <constraints>
-                        <options>
-                            <option label="30020">bazarr</option>
-                            <option label="30021">holyarrs</option>
-                        </options>
-                    </constraints>
-                    <control type="list" format="string">
-                        <heading>30006</heading>
-                    </control>
-                </setting>
                 <setting id="bazarr_url" type="string" label="30001" help="30011">
                     <level>0</level>
                     <default>http://127.0.0.1:6767</default>
@@ -28,21 +15,6 @@
                     </constraints>
                     <control type="edit" format="string">
                         <heading>30002</heading>
-                    </control>
-                </setting>
-                <setting id="holyarrs_url" type="string" label="30007" help="30017">
-                    <level>0</level>
-                    <default>http://127.0.0.1:6262</default>
-                    <control type="edit" format="string"/>
-                </setting>
-                <setting id="holyarrs_apikey" type="string" label="30008" help="30018">
-                    <level>0</level>
-                    <default></default>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                    <control type="edit" format="string">
-                        <heading>30008</heading>
                     </control>
                 </setting>
                 <setting id="verify_ssl" type="boolean" label="30003" help="30013">

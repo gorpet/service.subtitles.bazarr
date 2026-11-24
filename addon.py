@@ -3,7 +3,6 @@
 import json
 import os
 import sys
-import time
 
 import xbmc
 import xbmcaddon
@@ -27,7 +26,6 @@ import preutils as pu  # noqa: E402
 from bazarr import (  # noqa: E402
     BazarrClient, BazarrNotConfigured, BazarrItemNotFound, SUBTITLE_EXTENSIONS, wait_for_subtitle_file,
 )
-from holyarrs import HolyArrsClient, HolyArrsNotConfigured, HolyArrsItemNotFound, HolyArrsAuthError, HolyArrsHTTPError, is_foreign_file_conflict, conflicting_subtitles  # noqa: E402
 
 try:
     import requests
@@ -50,14 +48,9 @@ class ActionHandler(object):
             'download': self.download,
         }
 
-        self.backend = (__addon__.getSetting('backend') or 'bazarr').strip().lower()
-        if self.backend not in ('bazarr', 'holyarrs'):
-            self.backend = 'bazarr'
         self.client = self._build_client()
 
     def _build_client(self):
-        if self.backend == 'holyarrs':
-            return self._build_holyarrs_client()
         base_url = __addon__.getSetting('bazarr_url')
         api_key = __addon__.getSetting('bazarr_apikey')
         try:
@@ -68,27 +61,6 @@ class ActionHandler(object):
             return BazarrClient(base_url, api_key, verify_ssl=verify_ssl)
         except BazarrNotConfigured:
             self.notify(get_local_str(32000))
-            return None
-
-    @staticmethod
-    def _holyarrs_error_string(exc):
-        """The message id for a failed HolyArrs call: a refused key and an HTTP error are not 'could not reach'."""
-        if isinstance(exc, HolyArrsAuthError):
-            return 32009
-        if isinstance(exc, HolyArrsHTTPError):
-            return 32010
-        return 32007
-
-    def _build_holyarrs_client(self):
-        try:
-            verify_ssl = __addon__.getSettingBool('verify_ssl')
-        except Exception:
-            verify_ssl = __addon__.getSetting('verify_ssl') != 'false'
-        try:
-            return HolyArrsClient(__addon__.getSetting('holyarrs_url'), __addon__.getSetting('holyarrs_apikey'),
-                                  verify_ssl=verify_ssl)
-        except HolyArrsNotConfigured:
-            self.notify(get_local_str(32005))
             return None
 
     def notify(self, message):
@@ -111,10 +83,6 @@ class ActionHandler(object):
         show = self.get_current_show()
         wanted_langs = pu.kodi_langs_to_iso639_1(self.params.get('languages', [''])[0])
         self.log.debug("Current show: {0}, wanted langs: {1}".format(show, wanted_langs))
-
-        if self.backend == 'holyarrs':
-            self._search_holyarrs(show, wanted_langs)
-            return
 
         try:
             if show['type'] == 'episode':
@@ -147,46 +115,6 @@ class ActionHandler(object):
             self.notify(get_local_str(32004))
             return
 
-        for result in results:
-            self._add_search_result_item(show, context, result)
-
-    def _search_holyarrs(self, show, wanted_langs):
-        """HolyArrs: find the playing file by its library path, then ask its
-        subtitle sites for candidates (nothing is saved until one is picked)."""
-        media_type = 'episode' if show.get('type') == 'episode' else 'movie'
-        added = []
-        try:
-            found = self.client.find_file(show.get('file_original_path'), media_type=media_type,
-                                          title=show.get('title'), tvshow_title=show.get('tvshow_title'))
-            # Kodi asked for these languages; HolyArrs only searches the file's wished ones.
-            added = self.client.ensure_languages(found, wanted_langs)
-            if added:
-                self.log.debug("Added {0} to this file's wish".format(added))
-            results = self.client.list_subtitles(found['file_id'])
-        except HolyArrsItemNotFound as exc:
-            self.log.warning(str(exc))
-            self.notify(get_local_str(32006))
-            return
-        except Exception as exc:  # noqa: BLE001 - surface any transport error to the user
-            self.log.error("HolyArrs request failed: {0}".format(exc))
-            self.notify(get_local_str(self._holyarrs_error_string(exc)))
-            return
-
-        if wanted_langs:
-            results = [r for r in results if str(r.get('language', '')).lower()[:2] in wanted_langs]
-        if not results:
-            # Nothing to pick: do not leave the temporary wish behind.
-            if added and found.get('item_id'):
-                try:
-                    self.client.clear_wish(found['title_id'], found['item_id'])
-                except Exception as exc:  # noqa: BLE001
-                    self.log.warning("Could not drop the temporary wish: {0}".format(exc))
-            self.notify(get_local_str(32008))
-            return
-
-        # The temporary wish stays until the pick is saved (HolyArrs only accepts a pick for a wished language).
-        context = {'kind': 'holyarrs', 'file_id': found['file_id'], 'title_id': found.get('title_id'),
-                   'item_id': found.get('item_id'), 'temp_wish': bool(added)}
         for result in results:
             self._add_search_result_item(show, context, result)
 
@@ -233,10 +161,6 @@ class ActionHandler(object):
         video_stem = pu.path_stem(video_path)
         lang_code = str(result.get('language', ''))
 
-        if context.get('kind') == 'holyarrs':
-            self._download_holyarrs(context, result, video_dir, video_stem)
-            return
-
         def snapshot():
             _dirs, files = xbmcvfs.listdir(video_dir)
             signatures = {}
@@ -277,90 +201,6 @@ class ActionHandler(object):
             return
 
         subtitle_path = video_dir.rstrip('/') + '/' + found_name
-        self.add_subtitle_dir_item(subtitle_path)
-
-    def _remove_old_subtitles(self, video_dir, video_stem, language):
-        """Ask before touching anything, then delete this video's old subtitle files for the language so HolyArrs can
-        save the new one under that name. The contents are kept in memory until the save works, so a failed save
-        puts them back. Returns [(path, bytes)] for what was removed; empty when nothing was removed."""
-        _dirs, files = xbmcvfs.listdir(video_dir)
-        names = conflicting_subtitles(files, video_stem, language)
-        if not names:
-            return []
-        if not __dialog__.yesno(get_local_str(32011), get_local_str(32012).format(', '.join(names))):
-            return []
-        removed = []
-        base = video_dir.rstrip('/') + '/'
-        for name in names:
-            path = base + name
-            try:
-                handle = xbmcvfs.File(path)
-                content = handle.readBytes()
-                handle.close()
-            except Exception as exc:  # noqa: BLE001
-                self.log.error("Could not read {0} before replacing it: {1}".format(path, exc))
-                self._restore_subtitles(removed)
-                return []
-            if not xbmcvfs.delete(path):
-                self.log.error("Could not delete {0}".format(path))
-                self._restore_subtitles(removed)
-                return []
-            removed.append((path, content))
-        return removed
-
-    def _restore_subtitles(self, removed):
-        for path, content in removed:
-            try:
-                handle = xbmcvfs.File(path, 'w')
-                handle.write(content)
-                handle.close()
-            except Exception as exc:  # noqa: BLE001
-                self.log.error("Could not put {0} back: {1}".format(path, exc))
-
-    def _download_holyarrs(self, context, result, video_dir, video_stem=''):
-        """HolyArrs saves the chosen subtitle beside the video itself and says
-        where; wait briefly for the share to show the file, then hand it to Kodi."""
-        moved = []
-        try:
-            try:
-                saved = self.client.choose(context['file_id'], result)
-            except Exception as exc:  # noqa: BLE001
-                if not is_foreign_file_conflict(exc):
-                    raise
-                # HolyArrs never overwrites a subtitle it did not save. Offer to replace the old one, then try again.
-                moved = self._remove_old_subtitles(video_dir, video_stem, str(result.get('language', '')))
-                if not moved:
-                    raise
-                saved = self.client.choose(context['file_id'], result)
-        except Exception as exc:  # noqa: BLE001
-            self.log.error("HolyArrs choose failed: {0}".format(exc))
-            self._restore_subtitles(moved)  # the new one was not saved: put the old subtitle back
-            self.notify(get_local_str(self._holyarrs_error_string(exc)))
-            self.add_subtitle_dir_item('')
-            return
-        name = pu.path_leaf(saved or '')
-        if not name:
-            self.notify(get_local_str(32003))
-            self.add_subtitle_dir_item('')
-            return
-        if context.get('temp_wish') and context.get('item_id'):
-            try:
-                self.client.clear_wish(context['title_id'], context['item_id'])  # the saved file now covers the language
-            except Exception as exc:  # noqa: BLE001
-                self.log.warning("Could not drop the temporary wish: {0}".format(exc))
-        subtitle_path = video_dir.rstrip('/') + '/' + name
-        try:
-            wait_seconds = __addon__.getSettingInt('download_wait_seconds')
-        except Exception:
-            wait_seconds = int(__addon__.getSetting('download_wait_seconds') or 8)
-        deadline = time.time() + wait_seconds
-        while not xbmcvfs.exists(subtitle_path) and time.time() < deadline:
-            time.sleep(0.5)  # a network share can show a new file a moment late
-        if not xbmcvfs.exists(subtitle_path):
-            self.log.warning("HolyArrs saved {0} but {1} does not show it within {2}s".format(saved, subtitle_path, wait_seconds))
-            self.notify(get_local_str(32003))
-            self.add_subtitle_dir_item('')
-            return
         self.add_subtitle_dir_item(subtitle_path)
 
     def add_subtitle_dir_item(self, subtitle_path):

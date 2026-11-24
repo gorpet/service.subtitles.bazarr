@@ -48,8 +48,3 @@ def path_stem(path):
 def dir_of(path):
     norm = path.replace('\\', '/')
     return norm.rsplit('/', 1)[0] if '/' in norm else '.'
-
-
-def path_leaf(path):
-    """'Movie (2021)/Movie (2021).hr.srt' -> 'Movie (2021).hr.srt'"""
-    return path.replace('\\', '/').rstrip('/').rsplit('/', 1)[-1]

@@ -1,5 +1,9 @@
 # service.subtitles.bazarr
 
+> Using HolyArrs instead of Bazarr? Use the separate add-on
+> [`service.subtitles.holyarrs`](https://github.com/gorpet/service.subtitles.holyarrs). The HolyArrs backend
+> that this add-on had in 0.2.x moved there; this add-on is Bazarr-only again.
+
 Kodi subtitle addon that delegates all searching/downloading to an existing
 **Bazarr** instance instead of scraping subtitle sites directly. Works only
 for media that Bazarr already has indexed via Sonarr/Radarr, and requires
@@ -25,42 +29,6 @@ Addon settings (`Add-ons -> My add-ons -> Subtitles -> Bazarr -> Configure`):
 - **Seconds to wait for Bazarr to write the subtitle** - how long `download()`
   polls the video's folder before giving up
 - **Enable debug logging** - verbose request/response lines in `kodi.log`
-
-## Using HolyArrs instead of Bazarr (0.2.0)
-
-Pick **Subtitle server -> HolyArrs** in the add-on settings and fill in **HolyArrs URL** and
-**HolyArrs API key** (HolyArrs `Settings > API`, a key with the **all** scope). Bazarr stays the
-default and its code path is unchanged.
-
-How it differs from Bazarr:
-
-- The playing file is found by **path**: HolyArrs lists every file with a path relative to its
-  library folder (`Nobody (2021)/Nobody (2021).mkv`) and Kodi's playing path ends with it
-  (percent-escapes, case and `\` vs `/` are ignored). The title is only used to narrow the lookup,
-  with the folder name as a fallback. So Kodi and HolyArrs must see the files at paths that end alike.
-- `GET /api/v1/titles?q=` -> `GET /api/v1/titles/{id}/subtitles` (match by path) ->
-  `POST /api/v1/files/{id}/subtitles/choices` (asks the subtitle sites now, scored candidates,
-  saves nothing) -> `POST /api/v1/files/{id}/subtitles/choose` (`{"site","key"}`: saves the pick beside
-  the video and answers its path). Auth is the `X-Api-Key` header. No polling guesswork is needed:
-  the saved name comes back from `choose`.
-- **Languages already covered:** from HolyArrs 1.3.0 on, the list shows candidates for every wished language,
-  even one a sidecar or built-in track already has (HolyArrs reports what covers it), so you can swap a
-  subtitle. On HolyArrs 1.2.x only languages the file is *missing* are offered, and "no new subtitle to
-  offer" is normal for a file that already has every wished language.
-- **Replacing a subtitle HolyArrs did not save (0.2.3):** HolyArrs never overwrites a subtitle file it did not
-  save itself (for example one Bazarr saved), and answers HTTP 409. The add-on then asks "Replace the existing
-  subtitle?" and, on Yes, deletes that video's subtitle files for that language and asks HolyArrs to save the
-  pick again, so the new one takes the old name. The old contents are held in memory until the save works; if it
-  fails they are written back. Kodi needs write access to the folder (a read-only share cannot do this; the
-  add-on logs it and leaves the old subtitle alone).
-- **Languages outside the wish:** HolyArrs lists, and saves, only languages in the file's wish. So you can keep
-  the global wish short (say only Croatian, so the background search stays small) and still ask Kodi for
-  Bosnian: the add-on adds the languages Kodi asks for (Kodi's "Languages to download subtitles for") to
-  THAT ONE file's own wish (`PUT /api/v1/titles/{id}/subtitle-wish` with the file's `item_id`), lists the
-  candidates, and drops that wish again after the pick is saved (or at once when nothing was found). The
-  global setting is never changed. If you open the list and walk away without picking, the file keeps the
-  extra language in its wish until you pick or HolyArrs finds one on its own weekly search.
-  A search from Kodi costs one or two requests of the subtitle site's hourly limit.
 
 ## How it works
 
