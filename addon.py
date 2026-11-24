@@ -145,9 +145,14 @@ class ActionHandler(object):
         """HolyArrs: find the playing file by its library path, then ask its
         subtitle sites for candidates (nothing is saved until one is picked)."""
         media_type = 'episode' if show.get('type') == 'episode' else 'movie'
+        added = []
         try:
             found = self.client.find_file(show.get('file_original_path'), media_type=media_type,
                                           title=show.get('title'), tvshow_title=show.get('tvshow_title'))
+            # Kodi asked for these languages; HolyArrs only searches the file's wished ones.
+            added = self.client.ensure_languages(found, wanted_langs)
+            if added:
+                self.log.debug("Added {0} to this file's wish".format(added))
             results = self.client.list_subtitles(found['file_id'])
         except HolyArrsItemNotFound as exc:
             self.log.warning(str(exc))
@@ -161,12 +166,18 @@ class ActionHandler(object):
         if wanted_langs:
             results = [r for r in results if str(r.get('language', '')).lower()[:2] in wanted_langs]
         if not results:
-            # HolyArrs only offers candidates for languages the file is missing
-            # (or that it saved itself); a subtitle from elsewhere is left alone.
+            # Nothing to pick: do not leave the temporary wish behind.
+            if added and found.get('item_id'):
+                try:
+                    self.client.clear_wish(found['title_id'], found['item_id'])
+                except Exception as exc:  # noqa: BLE001
+                    self.log.warning("Could not drop the temporary wish: {0}".format(exc))
             self.notify(get_local_str(32008))
             return
 
-        context = {'kind': 'holyarrs', 'file_id': found['file_id']}
+        # The temporary wish stays until the pick is saved (HolyArrs only accepts a pick for a wished language).
+        context = {'kind': 'holyarrs', 'file_id': found['file_id'], 'title_id': found.get('title_id'),
+                   'item_id': found.get('item_id'), 'temp_wish': bool(added)}
         for result in results:
             self._add_search_result_item(show, context, result)
 
@@ -274,6 +285,11 @@ class ActionHandler(object):
             self.notify(get_local_str(32003))
             self.add_subtitle_dir_item('')
             return
+        if context.get('temp_wish') and context.get('item_id'):
+            try:
+                self.client.clear_wish(context['title_id'], context['item_id'])  # the saved file now covers the language
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("Could not drop the temporary wish: {0}".format(exc))
         subtitle_path = video_dir.rstrip('/') + '/' + name
         try:
             wait_seconds = __addon__.getSettingInt('download_wait_seconds')

@@ -14,6 +14,9 @@ Calls used:
                                                candidates, save nothing
   POST /api/v1/files/{id}/subtitles/choose     {"site", "key"}: save one candidate beside the
                                                video, answers {"path": ...}
+  PUT  /api/v1/titles/{id}/subtitle-wish       {"item_id", "languages": [...]} or {"item_id", "inherit": true}:
+                                               one file's own wish, so a language outside the global
+                                               wish can be searched on demand
 
 Good to know:
   * "choices" lists candidates for the languages the file is MISSING and for
@@ -123,6 +126,13 @@ class HolyArrsClient(object):
         r.raise_for_status()
         return r.json() if r.content else {}
 
+    def _put(self, path, payload=None):
+        url = '{0}/api/v1{1}'.format(self.base_url, path)
+        self.log.debug("PUT {0} json={1}".format(url, payload))
+        r = self.sess.put(url, json=payload, timeout=self.timeout, verify=self.verify_ssl)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
     # ---------------------------------------------------------------
     # find the file Kodi is playing
     # ---------------------------------------------------------------
@@ -141,9 +151,38 @@ class HolyArrsClient(object):
                 files = self._get('/titles/{0}/subtitles'.format(t['id'])).get('files') or []
                 for f in files:
                     if path_matches(video_path, f.get('relative_path')):
-                        return {'file_id': f['file_id'], 'relative_path': f['relative_path'],
-                                'title_id': t['id'], 'title': t.get('name')}
+                        wish = (f.get('wish') or {}).get('languages') or []
+                        return {'file_id': f['file_id'], 'item_id': f.get('item_id'), 'relative_path': f['relative_path'],
+                                'title_id': t['id'], 'title': t.get('name'), 'wish': wish}
         raise HolyArrsItemNotFound("No HolyArrs file ends like {0!r} (looked up: {1})".format(video_path, tried))
+
+    # ---------------------------------------------------------------
+    # asking for a language the wish does not name
+    # ---------------------------------------------------------------
+
+    def ensure_languages(self, found, wanted):
+        """Make the file's wish name the languages asked for in Kodi.
+
+        HolyArrs lists, and saves, candidates only for languages in the file's wish. With
+        a short global wish (say only Croatian) a person asking Kodi for Bosnian would get
+        nothing, so the missing languages are added to this ONE file's wish (the item's
+        own wish, the global setting is not touched) and the wish is kept until the pick
+        is saved. Returns the language codes that were added; clear_wish() removes them."""
+        have = [w.get('language') for w in found.get('wish') or []]
+        extra = []
+        for code in wanted or []:
+            code = (code or '').lower()
+            if code and code not in have and code not in extra:
+                extra.append(code)
+        if not extra or not found.get('item_id'):
+            return []
+        entries = [dict(w) for w in found.get('wish') or []] + [{'language': c} for c in extra]
+        self._put('/titles/{0}/subtitle-wish'.format(found['title_id']), {'item_id': found['item_id'], 'languages': entries})
+        return extra
+
+    def clear_wish(self, title_id, item_id):
+        """Drop the file's own wish so it follows the global one again."""
+        self._put('/titles/{0}/subtitle-wish'.format(title_id), {'item_id': item_id, 'inherit': True})
 
     # ---------------------------------------------------------------
     # manual search and download

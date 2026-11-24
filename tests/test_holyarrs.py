@@ -30,6 +30,7 @@ def client_with(routes):
     c.sess = mock.Mock()
     c.sess.get = lambda url, **kw: route('GET', url, **kw)
     c.sess.post = lambda url, **kw: route('POST', url, **kw)
+    c.sess.put = lambda url, **kw: route('PUT', url, **kw)
     return c
 
 
@@ -112,6 +113,39 @@ class ClientTests(unittest.TestCase):
     def test_list_subtitles_nothing_to_offer(self):
         c = client_with({('POST', '/files/7/subtitles/choices'): {'outcomes': [], 'sites_asked': []}})
         self.assertEqual(c.list_subtitles(7), [])
+
+    def test_find_file_returns_the_item_and_the_current_wish(self):
+        wish = [{'language': 'hr', 'hearing_impaired': 'normal', 'forced': False}]
+        c = client_with({
+            ('GET', '/titles'): {'titles': [{'id': 2, 'kind': 'movie', 'name': 'Nobody'}]},
+            ('GET', '/titles/2/subtitles'): {'files': [{'file_id': 20, 'item_id': 21, 'relative_path': 'Nobody (2021)/Nobody (2021).mkv', 'wish': {'from': 'default', 'languages': wish}}]},
+        })
+        got = c.find_file('/m/Nobody (2021)/Nobody (2021).mkv', 'movie', title='Nobody')
+        self.assertEqual((got['file_id'], got['item_id'], got['title_id'], got['wish']), (20, 21, 2, wish))
+
+    def test_ensure_languages_adds_only_what_the_wish_lacks_to_this_item(self):
+        c = client_with({('PUT', '/titles/2/subtitle-wish'): {}})
+        found = {'title_id': 2, 'item_id': 21, 'wish': [{'language': 'hr', 'hearing_impaired': 'normal', 'forced': False}]}
+        added = c.ensure_languages(found, ['hr', 'BS', 'sr', 'bs', ''])
+        self.assertEqual(added, ['bs', 'sr'])
+        method, path, body = c.calls[-1]
+        self.assertEqual((method, path), ('PUT', '/titles/2/subtitle-wish'))
+        self.assertEqual(body['item_id'], 21)
+        self.assertEqual([w['language'] for w in body['languages']], ['hr', 'bs', 'sr'])
+        self.assertEqual(body['languages'][0], found['wish'][0])  # the wish it already had is kept as it was
+
+    def test_ensure_languages_does_nothing_when_all_are_wished_or_no_item(self):
+        c = client_with({})
+        found = {'title_id': 2, 'item_id': 21, 'wish': [{'language': 'hr'}]}
+        self.assertEqual(c.ensure_languages(found, ['hr']), [])
+        self.assertEqual(c.ensure_languages(found, []), [])
+        self.assertEqual(c.ensure_languages({'title_id': 2, 'item_id': None, 'wish': []}, ['bs']), [])
+        self.assertEqual(c.calls, [])  # no request at all
+
+    def test_clear_wish_asks_the_item_to_follow_the_global_wish(self):
+        c = client_with({('PUT', '/titles/2/subtitle-wish'): {}})
+        c.clear_wish(2, 21)
+        self.assertEqual(c.calls[-1], ('PUT', '/titles/2/subtitle-wish', {'item_id': 21, 'inherit': True}))
 
     def test_choose_posts_site_and_key_and_returns_the_path(self):
         c = client_with({('POST', '/files/7/subtitles/choose'): {'path': 'Nobody (2021)/Nobody (2021).hr.srt'}})

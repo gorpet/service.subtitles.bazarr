@@ -46,9 +46,15 @@ How it differs from Bazarr:
 - **Languages already covered:** from HolyArrs 1.3.0 on, the list shows candidates for every wished language,
   even one a sidecar or built-in track already has (HolyArrs reports what covers it), so you can swap a
   subtitle. On HolyArrs 1.2.x only languages the file is *missing* are offered, and "no new subtitle to
-  offer" is normal for a file that already has every wished language. Only languages in the title's wish
-  are listed.
-
+  offer" is normal for a file that already has every wished language.
+- **Languages outside the wish:** HolyArrs lists, and saves, only languages in the file's wish. So you can keep
+  the global wish short (say only Croatian, so the background search stays small) and still ask Kodi for
+  Bosnian: the add-on adds the languages Kodi asks for (Kodi's "Languages to download subtitles for") to
+  THAT ONE file's own wish (`PUT /api/v1/titles/{id}/subtitle-wish` with the file's `item_id`), lists the
+  candidates, and drops that wish again after the pick is saved (or at once when nothing was found). The
+  global setting is never changed. If you open the list and walk away without picking, the file keeps the
+  extra language in its wish until you pick or HolyArrs finds one on its own weekly search.
+  A search from Kodi costs one or two requests of the subtitle site's hourly limit.
 
 ## How it works
 
