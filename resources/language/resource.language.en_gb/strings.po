@@ -116,3 +116,11 @@ msgstr ""
 msgctxt "#32008"
 msgid "HolyArrs has no new subtitle to offer for this item"
 msgstr ""
+
+msgctxt "#32009"
+msgid "HolyArrs refused the API key"
+msgstr ""
+
+msgctxt "#32010"
+msgid "HolyArrs answered with an error (see the Kodi log)"
+msgstr ""

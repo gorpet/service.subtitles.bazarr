@@ -27,7 +27,7 @@ import preutils as pu  # noqa: E402
 from bazarr import (  # noqa: E402
     BazarrClient, BazarrNotConfigured, BazarrItemNotFound, SUBTITLE_EXTENSIONS, wait_for_subtitle_file,
 )
-from holyarrs import HolyArrsClient, HolyArrsNotConfigured, HolyArrsItemNotFound  # noqa: E402
+from holyarrs import HolyArrsClient, HolyArrsNotConfigured, HolyArrsItemNotFound, HolyArrsAuthError, HolyArrsHTTPError  # noqa: E402
 
 try:
     import requests
@@ -69,6 +69,15 @@ class ActionHandler(object):
         except BazarrNotConfigured:
             self.notify(get_local_str(32000))
             return None
+
+    @staticmethod
+    def _holyarrs_error_string(exc):
+        """The message id for a failed HolyArrs call: a refused key and an HTTP error are not 'could not reach'."""
+        if isinstance(exc, HolyArrsAuthError):
+            return 32009
+        if isinstance(exc, HolyArrsHTTPError):
+            return 32010
+        return 32007
 
     def _build_holyarrs_client(self):
         try:
@@ -160,7 +169,7 @@ class ActionHandler(object):
             return
         except Exception as exc:  # noqa: BLE001 - surface any transport error to the user
             self.log.error("HolyArrs request failed: {0}".format(exc))
-            self.notify(get_local_str(32007))
+            self.notify(get_local_str(self._holyarrs_error_string(exc)))
             return
 
         if wanted_langs:
@@ -277,7 +286,7 @@ class ActionHandler(object):
             saved = self.client.choose(context['file_id'], result)
         except Exception as exc:  # noqa: BLE001
             self.log.error("HolyArrs choose failed: {0}".format(exc))
-            self.notify(get_local_str(32007))
+            self.notify(get_local_str(self._holyarrs_error_string(exc)))
             self.add_subtitle_dir_item('')
             return
         name = pu.path_leaf(saved or '')

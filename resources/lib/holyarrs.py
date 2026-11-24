@@ -46,6 +46,18 @@ class HolyArrsNotConfigured(HolyArrsError):
     pass
 
 
+class HolyArrsAuthError(HolyArrsError):
+    """HolyArrs answered 401 or 403: the API key is missing, revoked or too weak."""
+
+
+class HolyArrsHTTPError(HolyArrsError):
+    """HolyArrs answered with another HTTP error; status and message are kept for the log."""
+
+    def __init__(self, status, message=''):
+        super(HolyArrsHTTPError, self).__init__('HolyArrs answered HTTP {0}: {1}'.format(status, message))
+        self.status = status
+
+
 class HolyArrsItemNotFound(HolyArrsError):
     pass
 
@@ -112,25 +124,39 @@ class HolyArrsClient(object):
     # low level helpers
     # ---------------------------------------------------------------
 
+    @staticmethod
+    def _check(r):
+        """Turn a bad HTTP answer into a typed error instead of a bare requests exception."""
+        status = getattr(r, 'status_code', 200)
+        if isinstance(status, int) and status >= 400:
+            if status in (401, 403):
+                raise HolyArrsAuthError('HolyArrs refused the API key (HTTP {0})'.format(status))
+            try:
+                message = (r.json() or {}).get('error', '')
+            except Exception:  # noqa: BLE001 - not JSON
+                message = ''
+            raise HolyArrsHTTPError(status, message)
+        r.raise_for_status()
+
     def _get(self, path, params=None):
         url = '{0}/api/v1{1}'.format(self.base_url, path)
         self.log.debug("GET {0} params={1}".format(url, params))
         r = self.sess.get(url, params=params or {}, timeout=self.timeout, verify=self.verify_ssl)
-        r.raise_for_status()
+        self._check(r)
         return r.json()
 
     def _post(self, path, payload=None):
         url = '{0}/api/v1{1}'.format(self.base_url, path)
         self.log.debug("POST {0} json={1}".format(url, payload))
         r = self.sess.post(url, json=payload, timeout=self.timeout, verify=self.verify_ssl)
-        r.raise_for_status()
+        self._check(r)
         return r.json() if r.content else {}
 
     def _put(self, path, payload=None):
         url = '{0}/api/v1{1}'.format(self.base_url, path)
         self.log.debug("PUT {0} json={1}".format(url, payload))
         r = self.sess.put(url, json=payload, timeout=self.timeout, verify=self.verify_ssl)
-        r.raise_for_status()
+        self._check(r)
         return r.json() if r.content else {}
 
     # ---------------------------------------------------------------

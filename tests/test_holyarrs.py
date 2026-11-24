@@ -154,5 +154,24 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(c.calls[-1], ('POST', '/files/7/subtitles/choose', {'site': 'Titlovi', 'key': '2'}))
 
 
+    def test_a_refused_key_is_not_reported_as_unreachable(self):
+        c = HolyArrsClient('http://h/', 'key')
+        for status in (401, 403):
+            r = mock.Mock(status_code=status)
+            c.sess = mock.Mock(get=mock.Mock(return_value=r))
+            with self.assertRaises(holyarrs.HolyArrsAuthError):
+                c._get('/titles')
+
+    def test_other_http_errors_keep_status_and_message(self):
+        c = HolyArrsClient('http://h/', 'key')
+        r = mock.Mock(status_code=409)
+        r.json.return_value = {'error': 'language not wished'}
+        c.sess = mock.Mock(post=mock.Mock(return_value=r))
+        with self.assertRaises(holyarrs.HolyArrsHTTPError) as ctx:
+            c._post('/files/7/subtitles/choose', {})
+        self.assertEqual(ctx.exception.status, 409)
+        self.assertIn('language not wished', str(ctx.exception))
+
+
 if __name__ == '__main__':
     unittest.main()
